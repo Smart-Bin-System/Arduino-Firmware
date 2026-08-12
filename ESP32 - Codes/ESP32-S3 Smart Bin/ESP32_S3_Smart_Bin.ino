@@ -252,9 +252,8 @@ void serviceServos() {
 // ---------------------------------------------------------------------------
 int jpegBlockCallback(JPEGDRAW* draw) {
   if (!decodeState.rgb || !draw || !draw->pPixels) return 0;
-  if (draw->iBpp != 32) return 0;
-  // JPEGDEC RGB8888 is stored as R, G, B, A bytes on the little-endian S3.
-  const uint8_t* pixels = reinterpret_cast<const uint8_t*>(draw->pPixels);
+  if (draw->iBpp != 16) return 0;
+  const uint16_t* pixels = draw->pPixels;
 
   for (int row = 0; row < draw->iHeight; ++row) {
     const int y = draw->y + row;
@@ -264,11 +263,15 @@ int jpegBlockCallback(JPEGDRAW* draw) {
       if (x < 0 || x >= decodeState.width) continue;
 
       const size_t pixelOffset =
-          (static_cast<size_t>(row) * draw->iWidth + column) * 4;
+          static_cast<size_t>(row) * draw->iWidth + column;
       const size_t offset = (static_cast<size_t>(y) * decodeState.width + x) * 3;
-      decodeState.rgb[offset] = pixels[pixelOffset];
-      decodeState.rgb[offset + 1] = pixels[pixelOffset + 1];
-      decodeState.rgb[offset + 2] = pixels[pixelOffset + 2];
+      const uint16_t pixel = pixels[pixelOffset];
+      decodeState.rgb[offset] =
+          static_cast<uint8_t>(((pixel >> 11) & 0x1F) * 255 / 31);
+      decodeState.rgb[offset + 1] =
+          static_cast<uint8_t>(((pixel >> 5) & 0x3F) * 255 / 63);
+      decodeState.rgb[offset + 2] =
+          static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
     }
   }
   return 1;
@@ -299,12 +302,21 @@ bool decodeAndResizeIntoModelInput(const uint8_t* jpegBytes, size_t jpegLength) 
     decodeScale = 2;
     decodeOption = JPEG_SCALE_HALF;
   }
-  decodeState.width = max(1, originalWidth / decodeScale);
-  decodeState.height = max(1, originalHeight / decodeScale);
+  decodeState.width =
+      max(1, (originalWidth + decodeScale - 1) / decodeScale);
+  decodeState.height =
+      max(1, (originalHeight + decodeScale - 1) / decodeScale);
+  if (decodeState.width <= 0 || decodeState.height <= 0 ||
+      static_cast<size_t>(decodeState.width) >
+          MAX_DECODED_PIXELS / static_cast<size_t>(decodeState.height)) {
+    Serial.printf("[JPEG] Unsupported dimensions: %dx%d\n", decodeState.width,
+                  decodeState.height);
+    jpeg.close();
+    return false;
+  }
   const size_t pixelCount =
       static_cast<size_t>(decodeState.width) * decodeState.height;
-  if (decodeState.width <= 0 || decodeState.height <= 0 ||
-      pixelCount > MAX_DECODED_PIXELS) {
+  if (pixelCount > MAX_DECODED_PIXELS) {
     Serial.printf("[JPEG] Unsupported dimensions: %dx%d\n", decodeState.width,
                   decodeState.height);
     jpeg.close();
@@ -318,8 +330,11 @@ bool decodeAndResizeIntoModelInput(const uint8_t* jpegBytes, size_t jpegLength) 
     jpeg.close();
     return false;
   }
+  memset(decodeState.rgb, 0, pixelCount * 3);
 
-  jpeg.setPixelType(RGB8888);
+  // JPEGDEC provides RGB565_LITTLE_ENDIAN as uint16_t callback pixels on the
+  // little-endian ESP32-S3. The callback expands each pixel to RGB888.
+  jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
   const bool decoded = jpeg.decode(0, 0, decodeOption) == 1;
   jpeg.close();
   if (!decoded) {
