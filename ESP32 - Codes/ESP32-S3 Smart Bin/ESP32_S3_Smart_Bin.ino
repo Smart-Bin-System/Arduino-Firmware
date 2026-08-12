@@ -71,10 +71,14 @@ constexpr float MODEL_OUTPUT_SCALE = 0.00390625F;
 constexpr int MODEL_OUTPUT_ZERO_POINT = -128;
 constexpr float CONFIDENCE_THRESHOLD = 0.60F;
 
-// WARNING: No authoritative training class-index mapping was present in the
-// repositories or embedded TFLite metadata. This order MUST be checked against
-// the training/export pipeline. Array position is the model output index.
-const char* CLASS_NAMES[5] = {"PET", "HDPE", "LDPE", "PP", "OTHER"};
+// Confirmed training/export order. Array position is the TFLite output index.
+const char* CLASS_NAMES[5] = {
+    "PET",
+    "HDPE",
+    "LDPE",
+    "PP",
+    "OTHER"
+};
 
 constexpr char FIRMWARE_VERSION[] = "2.0.0";
 constexpr char MODEL_VERSION[] = "plastic-classifier-int8";
